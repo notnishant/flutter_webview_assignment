@@ -59,10 +59,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
     switch (type) {
       case 'alert':
-        _showAlert(
-          title: payload['title'] ?? 'Alert',
+        _showToast(
           message: payload['message'] ?? '',
           isError: payload['isError'] ?? false,
+          field: payload['field'],
         );
         break;
       case 'formSubmit':
@@ -104,40 +104,91 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Future<void> _checkConnectivity() async {
     final result = await Connectivity().checkConnectivity();
     if (result == ConnectivityResult.none && mounted) {
-      _showAlert(
-        title: 'Network Error',
+      _showToast(
         message: 'No internet connection. Please check your network.',
         isError: true,
       );
     }
   }
 
-  Future<void> _showAlert({
-    required String title,
+  void _showToast({
     required String message,
     bool isError = false,
+    String? field,
   }) {
-    return showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        backgroundColor: isError ? Colors.red[50] : Colors.white,
-        titleTextStyle: TextStyle(
-          color: isError ? Colors.red[700] : Colors.black,
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
+    final Color backgroundColor = isError
+        ? const Color(0xFFDC3545).withOpacity(0.95)
+        : const Color(0xFF28A745).withOpacity(0.95);
+
+    final Widget content = Row(
+      children: [
+        Icon(
+          isError ? Icons.error_outline : Icons.check_circle_outline,
+          color: Colors.white,
+          size: 20,
         ),
-        contentTextStyle: TextStyle(
-          color: isError ? Colors.red[900] : Colors.black87,
-          fontSize: 16,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text("OK"),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isError ? 'Error' : 'Success',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (field != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Field: ${field.replaceFirst(field[0], field[0].toUpperCase())}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 2),
+              Text(
+                message,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 13,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
-        ],
+        ),
+      ],
+    );
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: content,
+        backgroundColor: backgroundColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.of(context).size.height * 0.1,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        duration: const Duration(milliseconds: 4000),
+        dismissDirection: DismissDirection.horizontal,
+        action: SnackBarAction(
+          label: 'Dismiss',
+          textColor: Colors.white,
+          onPressed: () {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          },
+        ),
       ),
     );
   }
