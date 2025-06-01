@@ -7,7 +7,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('WebView Demo'),
+        title: const Text('Flutter Screen'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
       ),

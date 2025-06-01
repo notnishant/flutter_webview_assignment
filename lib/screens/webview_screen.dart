@@ -14,7 +14,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _hasError = false;
-
   final String reactAppUrl = 'https://notnishant.github.io/todo-react-main/';
 
   @override
@@ -54,7 +53,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
       ..loadRequest(Uri.parse(reactAppUrl));
   }
 
-  void _handleMessage(Map<String, dynamic> data) {
+  void _handleMessage(Map<String, dynamic> data) async {
     final String type = data['type'] ?? '';
     final Map<String, dynamic> payload = data['data'] ?? {};
 
@@ -67,25 +66,39 @@ class _WebViewScreenState extends State<WebViewScreen> {
         );
         break;
       case 'formSubmit':
-        _handleFormSubmit(payload);
+        final result = await Navigator.pushNamed(
+          context,
+          '/result',
+          arguments: {'data': payload, 'timestamp': DateTime.now().toString()},
+        );
+
+        if (result != null) {
+          final reviewData = result as Map<String, dynamic>;
+          final combinedData = {...payload, ...reviewData};
+          _sendToReact('navigateToReview', combinedData);
+        }
         break;
     }
   }
 
-  void _handleFormSubmit(Map<String, dynamic> formData) {
-    Navigator.pushNamed(
-      context,
-      '/result',
-      arguments: {'data': formData, 'timestamp': DateTime.now().toString()},
-    );
-  }
-
-  // Send data to React
   void _sendToReact(String type, Map<String, dynamic> data) {
     final message = jsonEncode({'type': type, 'data': data});
-    _controller.runJavaScript(
-      'window.receiveFromFlutter && window.receiveFromFlutter($message);',
-    );
+
+    _controller.runJavaScript('''
+      if (typeof window.receiveFromFlutter !== 'function') {
+        window.receiveFromFlutter = function(data) {
+          const parsedData = typeof data === 'string' ? JSON.parse(data) : data;
+          if (parsedData.type === 'navigateToReview') {
+            localStorage.setItem('reviewData', JSON.stringify(parsedData.data));
+            if (window.flutterBridge && window.flutterBridge.handleFlutterMessage) {
+              window.flutterBridge.handleFlutterMessage(parsedData);
+            }
+          }
+        };
+      }
+      localStorage.setItem('reviewData', JSON.stringify(${jsonEncode(data)}));
+      window.receiveFromFlutter(${jsonEncode(message)});
+    ''');
   }
 
   Future<void> _checkConnectivity() async {
