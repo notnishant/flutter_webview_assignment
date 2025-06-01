@@ -2,9 +2,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
-import 'package:flutter/services.dart';
 
 class WebViewScreen extends StatefulWidget {
   const WebViewScreen({super.key});
@@ -17,24 +14,14 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _hasError = false;
-  String _errorMessage = '';
-  bool _isLocal = false; // Toggle for local/remote
-  String _username = '';
-  bool _isConnected = true;
 
   final String reactAppUrl = 'https://notnishant.github.io/todo-react-main/';
-  final String localHtmlPath =
-      'assets/local_react.html'; // Place your local HTML in assets
 
   @override
   void initState() {
     super.initState();
-    _loadUsername();
     _checkConnectivity();
-    _initWebView();
-  }
 
-  void _initWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
@@ -44,83 +31,130 @@ class _WebViewScreenState extends State<WebViewScreen> {
             _hasError = false;
           }),
           onPageFinished: (_) => setState(() => _isLoading = false),
-          onWebResourceError: (error) => setState(() {
+          onWebResourceError: (_) => setState(() {
             _hasError = true;
             _isLoading = false;
-            _errorMessage = error.description ?? 'Could not load page.';
           }),
         ),
       )
+    // Handle alerts and validation messages
       ..addJavaScriptChannel(
         'showAlert',
         onMessageReceived: (JavaScriptMessage message) {
-          final data = jsonDecode(message.message);
-          if (data['action'] == 'showAlert') {
-            _showAlert(context, {
-              'type': 'info',
-              'title': 'Message from React',
-              'message': data['message'],
-            });
+          final alertData = jsonDecode(message.message);
+          _showAlert(context, alertData);
+
+          // If it's a validation error with a field, focus that field
+          if (alertData['type'] == 'validation' && alertData['field'] != null) {
+            _focusField(alertData['field']);
           }
         },
-      );
-    _loadWebView();
+      )
+    // Handle field updates and validation
+      ..addJavaScriptChannel(
+        'updateField',
+        onMessageReceived: (JavaScriptMessage message) {
+          final data = jsonDecode(message.message);
+          debugPrint('Field ${data['field']} updated: ${data['value']}');
+
+          // Handle validation errors
+          if (!data['isValid']) {
+            debugPrint('Validation error: ${data['error']}');
+          }
+        },
+      )
+    // Handle form submission
+      ..addJavaScriptChannel(
+        'submitForm',
+        onMessageReceived: (JavaScriptMessage message) {
+          final decoded = jsonDecode(message.message);
+          final formData = decoded['data'];
+          final timestamp = decoded['timestamp'];
+
+          // Navigate to ResultScreen with the data
+          _showAlert(context, {
+            'type': 'success',
+            'title': 'Success',
+            'message': 'Form submitted successfully!',
+          }).then((_) {
+            // Navigate to result screen after alert is dismissed
+            Navigator.pushNamed(
+              context,
+              '/result',
+              arguments: {
+                'data': formData,
+                'timestamp': timestamp,
+              },
+            );
+          });
+        },
+      )
+    // Handle validation errors
+      ..addJavaScriptChannel(
+        'validationErrors',
+        onMessageReceived: (JavaScriptMessage message) {
+          final data = jsonDecode(message.message);
+          debugPrint('Validation errors: ${data['errors']}');
+
+          // Send validation errors back to React if needed
+          _sendToReact('validationError', {
+            'errors': data['errors'],
+            'firstErrorField': data['firstErrorField'],
+          });
+        },
+      )
+    // Handle initial data request
+      ..addJavaScriptChannel(
+        'requestInitialData',
+        onMessageReceived: (JavaScriptMessage message) {
+          // Send any pre-filled data to React
+          _sendToReact('prefilledData', {
+            'firstName': 'John',
+            'lastName': 'Doe',
+            'email': 'john.doe@example.com',
+          });
+        },
+      )
+      ..loadRequest(Uri.parse(reactAppUrl));
   }
 
-  void _loadWebView() async {
-    if (_isLocal) {
-      // Load local HTML file
-      final String filePath = await _getLocalFilePath();
-      _controller.loadFile(filePath);
-    } else {
-      _controller.loadRequest(Uri.parse(reactAppUrl));
-    }
-  }
-
-  Future<String> _getLocalFilePath() async {
-    // For webview_flutter, local file loading differs by platform
-    if (Platform.isAndroid) {
-      return 'file:///android_asset/flutter_assets/$localHtmlPath';
-    } else if (Platform.isIOS) {
-      return await rootBundle.loadString(localHtmlPath);
-    }
-    return localHtmlPath;
-  }
-
+  // Send data back to React
   void _sendToReact(String type, Map<String, dynamic> data) {
-    final message = jsonEncode({'type': type, 'data': data});
+    final message = jsonEncode({
+      'type': type,
+      'data': data,
+    });
     _controller.runJavaScript(
-      'window.receiveFromFlutter && window.receiveFromFlutter($message);',
+        'window.receiveFromFlutter && window.receiveFromFlutter($message);'
     );
   }
 
-  void _sendUsername() {
-    _sendToReact('setUsername', {'username': _username});
+  // Focus a specific form field
+  void _focusField(String fieldId) {
+    _controller.runJavaScript(
+        'document.getElementById("$fieldId")?.focus();'
+    );
   }
 
   Future<void> _checkConnectivity() async {
     final result = await Connectivity().checkConnectivity();
-    setState(() {
-      _isConnected = result != ConnectivityResult.none;
-    });
-    if (!_isConnected) {
-      _showAlert(context, {
-        'type': 'validation',
-        'title': 'Network Error',
-        'message': 'No internet connection. Please check your network.',
-      });
+    if (result == ConnectivityResult.none) {
+      if (mounted) {
+        _showAlert(context, {
+          'type': 'validation',
+          'title': 'Network Error',
+          'message': 'No internet connection. Please check your network.',
+        });
+      }
     }
   }
 
-  Future<void> _showAlert(
-    BuildContext context,
-    Map<String, dynamic> alertData,
-  ) {
+  Future<void> _showAlert(BuildContext context, Map<String, dynamic> alertData) {
     return showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(alertData['title'] ?? ''),
-        content: Text(alertData['message'] ?? ''),
+        title: Text(alertData['title']),
+        content: Text(alertData['message']),
         backgroundColor: alertData['type'] == 'validation'
             ? Colors.red[50]
             : Colors.green[50],
@@ -147,98 +181,36 @@ class _WebViewScreenState extends State<WebViewScreen> {
     );
   }
 
-  Future<void> _loadUsername() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _username = prefs.getString('username') ?? '';
-    });
-  }
-
-  Future<void> _saveUsername(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('username', username);
-    setState(() {
-      _username = username;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('WebView'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              setState(() {
-                _hasError = false;
-                _isLoading = true;
-              });
-              _loadWebView();
-            },
-          ),
-          IconButton(
-            icon: Icon(_isLocal ? Icons.cloud : Icons.insert_drive_file),
-            tooltip: _isLocal ? 'Load Remote' : 'Load Local',
-            onPressed: () {
-              setState(() {
-                _isLocal = !_isLocal;
-                _hasError = false;
-                _isLoading = true;
-              });
-              _loadWebView();
-            },
-          ),
-        ],
+        title: const Text('Contact Form'),
+        backgroundColor: const Color(0xFF4F46E5), // Match React app's primary color
+        foregroundColor: Colors.white,
       ),
-      body: Column(
+      body: _hasError
+          ? Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'Could not load page.\nPlease check your connection and try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => _controller.reload(),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      )
+          : Stack(
         children: [
-          if (!_isConnected)
-            Container(
-              color: Colors.red[100],
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              child: const Text(
-                'No internet connection',
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: const InputDecoration(labelText: 'Username'),
-                    controller: TextEditingController(text: _username),
-                    onChanged: (val) => _saveUsername(val),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: _sendUsername,
-                  child: const Text('Send to React'),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Stack(
-              children: [
-                if (_hasError)
-                  Center(
-                    child: Text(
-                      _errorMessage,
-                      style: const TextStyle(color: Colors.red, fontSize: 18),
-                    ),
-                  ),
-                if (!_hasError) WebViewWidget(controller: _controller),
-                if (_isLoading)
-                  const Center(child: CircularProgressIndicator()),
-              ],
-            ),
-          ),
+          SizedBox.expand(child: WebViewWidget(controller: _controller)),
+          if (_isLoading) const Center(child: CircularProgressIndicator()),
         ],
       ),
     );

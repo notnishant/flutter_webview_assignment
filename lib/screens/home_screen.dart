@@ -6,13 +6,15 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Flutter WebView Assignment')),
+      appBar: AppBar(
+        title: const Text('Flutter WebView Assignment'),
+      ),
       body: Center(
         child: ElevatedButton(
           onPressed: () {
             Navigator.pushNamed(context, '/webview');
           },
-          child: const Text('Open React App in WebView'),
+          child: const Text('Open React App'),
         ),
       ),
     );
