@@ -21,7 +21,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
   void initState() {
     super.initState();
     _checkConnectivity();
+    _initializeWebView();
+  }
 
+  void _initializeWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
@@ -37,138 +40,83 @@ class _WebViewScreenState extends State<WebViewScreen> {
           }),
         ),
       )
-    // Handle alerts and validation messages
       ..addJavaScriptChannel(
-        'showAlert',
+        'flutterChannel',
         onMessageReceived: (JavaScriptMessage message) {
-          final alertData = jsonDecode(message.message);
-          _showAlert(context, alertData);
-
-          // If it's a validation error with a field, focus that field
-          if (alertData['type'] == 'validation' && alertData['field'] != null) {
-            _focusField(alertData['field']);
+          try {
+            final data = jsonDecode(message.message);
+            _handleMessage(data);
+          } catch (e) {
+            debugPrint('Error processing message: $e');
           }
-        },
-      )
-    // Handle field updates and validation
-      ..addJavaScriptChannel(
-        'updateField',
-        onMessageReceived: (JavaScriptMessage message) {
-          final data = jsonDecode(message.message);
-          debugPrint('Field ${data['field']} updated: ${data['value']}');
-
-          // Handle validation errors
-          if (!data['isValid']) {
-            debugPrint('Validation error: ${data['error']}');
-          }
-        },
-      )
-    // Handle form submission
-      ..addJavaScriptChannel(
-        'submitForm',
-        onMessageReceived: (JavaScriptMessage message) {
-          final decoded = jsonDecode(message.message);
-          final formData = decoded['data'];
-          final timestamp = decoded['timestamp'];
-
-          // Navigate to ResultScreen with the data
-          _showAlert(context, {
-            'type': 'success',
-            'title': 'Success',
-            'message': 'Form submitted successfully!',
-          }).then((_) {
-            // Navigate to result screen after alert is dismissed
-            Navigator.pushNamed(
-              context,
-              '/result',
-              arguments: {
-                'data': formData,
-                'timestamp': timestamp,
-              },
-            );
-          });
-        },
-      )
-    // Handle validation errors
-      ..addJavaScriptChannel(
-        'validationErrors',
-        onMessageReceived: (JavaScriptMessage message) {
-          final data = jsonDecode(message.message);
-          debugPrint('Validation errors: ${data['errors']}');
-
-          // Send validation errors back to React if needed
-          _sendToReact('validationError', {
-            'errors': data['errors'],
-            'firstErrorField': data['firstErrorField'],
-          });
-        },
-      )
-    // Handle initial data request
-      ..addJavaScriptChannel(
-        'requestInitialData',
-        onMessageReceived: (JavaScriptMessage message) {
-          // Send any pre-filled data to React
-          _sendToReact('prefilledData', {
-            'firstName': 'John',
-            'lastName': 'Doe',
-            'email': 'john.doe@example.com',
-          });
         },
       )
       ..loadRequest(Uri.parse(reactAppUrl));
   }
 
-  // Send data back to React
-  void _sendToReact(String type, Map<String, dynamic> data) {
-    final message = jsonEncode({
-      'type': type,
-      'data': data,
-    });
-    _controller.runJavaScript(
-        'window.receiveFromFlutter && window.receiveFromFlutter($message);'
+  void _handleMessage(Map<String, dynamic> data) {
+    final String type = data['type'] ?? '';
+    final Map<String, dynamic> payload = data['data'] ?? {};
+
+    switch (type) {
+      case 'alert':
+        _showAlert(
+          title: payload['title'] ?? 'Alert',
+          message: payload['message'] ?? '',
+          isError: payload['isError'] ?? false,
+        );
+        break;
+      case 'formSubmit':
+        _handleFormSubmit(payload);
+        break;
+    }
+  }
+
+  void _handleFormSubmit(Map<String, dynamic> formData) {
+    Navigator.pushNamed(
+      context,
+      '/result',
+      arguments: {'data': formData, 'timestamp': DateTime.now().toString()},
     );
   }
 
-  // Focus a specific form field
-  void _focusField(String fieldId) {
+  // Send data to React
+  void _sendToReact(String type, Map<String, dynamic> data) {
+    final message = jsonEncode({'type': type, 'data': data});
     _controller.runJavaScript(
-        'document.getElementById("$fieldId")?.focus();'
+      'window.receiveFromFlutter && window.receiveFromFlutter($message);',
     );
   }
 
   Future<void> _checkConnectivity() async {
     final result = await Connectivity().checkConnectivity();
-    if (result == ConnectivityResult.none) {
-      if (mounted) {
-        _showAlert(context, {
-          'type': 'validation',
-          'title': 'Network Error',
-          'message': 'No internet connection. Please check your network.',
-        });
-      }
+    if (result == ConnectivityResult.none && mounted) {
+      _showAlert(
+        title: 'Network Error',
+        message: 'No internet connection. Please check your network.',
+        isError: true,
+      );
     }
   }
 
-  Future<void> _showAlert(BuildContext context, Map<String, dynamic> alertData) {
+  Future<void> _showAlert({
+    required String title,
+    required String message,
+    bool isError = false,
+  }) {
     return showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(alertData['title']),
-        content: Text(alertData['message']),
-        backgroundColor: alertData['type'] == 'validation'
-            ? Colors.red[50]
-            : Colors.green[50],
+        title: Text(title),
+        content: Text(message),
+        backgroundColor: isError ? Colors.red[50] : Colors.white,
         titleTextStyle: TextStyle(
-          color: alertData['type'] == 'validation'
-              ? Colors.red[700]
-              : Colors.green[700],
+          color: isError ? Colors.red[700] : Colors.black,
           fontSize: 18,
           fontWeight: FontWeight.bold,
         ),
         contentTextStyle: TextStyle(
-          color: alertData['type'] == 'validation'
-              ? Colors.red[900]
-              : Colors.green[900],
+          color: isError ? Colors.red[900] : Colors.black87,
           fontSize: 16,
         ),
         actions: [
@@ -185,34 +133,35 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Contact Form'),
-        backgroundColor: const Color(0xFF4F46E5), // Match React app's primary color
+        title: const Text('React WebView'),
+        backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
       ),
       body: _hasError
           ? Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Could not load page.\nPlease check your connection and try again.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => _controller.reload(),
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      )
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'Could not load page.\nPlease check your connection and try again.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => _controller.reload(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
           : Stack(
-        children: [
-          SizedBox.expand(child: WebViewWidget(controller: _controller)),
-          if (_isLoading) const Center(child: CircularProgressIndicator()),
-        ],
-      ),
+              children: [
+                WebViewWidget(controller: _controller),
+                if (_isLoading)
+                  const Center(child: CircularProgressIndicator()),
+              ],
+            ),
     );
   }
 }
